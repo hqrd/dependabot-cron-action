@@ -187,6 +187,8 @@ const run = async () => {
   const prAuthor = getInput('pr-author') || DEFAULT_PR_AUTHOR
   const octokit = getOctokit(token)
   const autoMerge = getAutoMerge(getInput('auto-merge'))
+  const skipChecksForAutoMerge =
+    getInput('skip-checks-for-auto-merge') === 'true'
   const mergeMethod = getMergeMethod(getInput('merge-method'))
 
   const pullRequests = (
@@ -200,57 +202,60 @@ const run = async () => {
     const prTitle = pr.title
 
     info(`Processing PR #${prNumber}: ${prTitle}`)
-    const lastCommitHash = pr.head.sha
-    const checkRuns = await octokit.rest.checks.listForRef({
-      owner,
-      repo,
-      ref: lastCommitHash,
-    })
+    const useGitHubAutoMerge = skipChecksForAutoMerge && Boolean(pr.auto_merge)
+    if (!useGitHubAutoMerge) {
+      const lastCommitHash = pr.head.sha
+      const checkRuns = await octokit.rest.checks.listForRef({
+        owner,
+        repo,
+        ref: lastCommitHash,
+      })
 
-    const nonSkippedCheckRuns = checkRuns.data.check_runs.filter(
-      (run) => run.conclusion !== 'skipped'
-    )
-
-    const checksWereRun = nonSkippedCheckRuns.length > 0
-    if (!checksWereRun) {
-      info('No checks were run')
-      debugJSON(checkRuns.data)
-      continue
-    }
-
-    const allChecksHaveSucceeded =
-      checksWereRun &&
-      nonSkippedCheckRuns.every(
-        (run) => run.conclusion === 'success' || run.conclusion === 'neutral'
+      const nonSkippedCheckRuns = checkRuns.data.check_runs.filter(
+        (run) => run.conclusion !== 'skipped'
       )
-    if (!allChecksHaveSucceeded) {
-      info('All checks did not succeed')
-      debugJSON(checkRuns.data)
-      continue
-    }
 
-    const statuses = await octokit.rest.repos.listCommitStatusesForRef({
-      owner,
-      repo,
-      ref: lastCommitHash,
-    })
-    const seenContexts = new Set<string>()
-    const uniqueStatuses = statuses.data.filter((item) => {
-      if (seenContexts.has(item.context)) {
-        return false
+      const checksWereRun = nonSkippedCheckRuns.length > 0
+      if (!checksWereRun) {
+        info('No checks were run')
+        debugJSON(checkRuns.data)
+        continue
       }
 
-      seenContexts.add(item.context)
-      return true
-    })
+      const allChecksHaveSucceeded =
+        checksWereRun &&
+        nonSkippedCheckRuns.every(
+          (run) => run.conclusion === 'success' || run.conclusion === 'neutral'
+        )
+      if (!allChecksHaveSucceeded) {
+        info('All checks did not succeed')
+        debugJSON(checkRuns.data)
+        continue
+      }
 
-    const allStatusesHaveSucceeded = uniqueStatuses.every(
-      (run) => run.state === 'success'
-    )
-    if (!allStatusesHaveSucceeded) {
-      info('All statuses did not succeed')
-      debugJSON(statuses.data)
-      continue
+      const statuses = await octokit.rest.repos.listCommitStatusesForRef({
+        owner,
+        repo,
+        ref: lastCommitHash,
+      })
+      const seenContexts = new Set<string>()
+      const uniqueStatuses = statuses.data.filter((item) => {
+        if (seenContexts.has(item.context)) {
+          return false
+        }
+
+        seenContexts.add(item.context)
+        return true
+      })
+
+      const allStatusesHaveSucceeded = uniqueStatuses.every(
+        (run) => run.state === 'success'
+      )
+      if (!allStatusesHaveSucceeded) {
+        info('All statuses did not succeed')
+        debugJSON(statuses.data)
+        continue
+      }
     }
 
     // Try to get version bump from commit message metadata (works for grouped updates)
@@ -276,9 +281,17 @@ const run = async () => {
         (autoMerge === 'major' || autoMerge === 'minor')) ||
       versionBump === 'patch'
     ) {
-      info('Approving and merging')
+      info(
+        useGitHubAutoMerge
+          ? 'Approving for GitHub auto-merge'
+          : 'Approving and merging'
+      )
       if (await approve(octokit, { owner, repo, prNumber })) {
         info('Approved successfully')
+        if (useGitHubAutoMerge) {
+          info('GitHub auto-merge is already enabled; leaving merge to GitHub')
+          continue
+        }
         if (await merge(octokit, { owner, repo, prNumber, mergeMethod })) {
           info('Merged successfully')
         }

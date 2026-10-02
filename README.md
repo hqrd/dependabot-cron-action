@@ -34,6 +34,18 @@ A [GitHub token](https://docs.github.com/en/github/authenticating-to-github/keep
 Which version updates to merge automatically: `major`, `minor` or `patch`.
 Defaults to `minor`.
 
+### `skip-checks-for-auto-merge` (optional)
+
+Defaults to `false`. Set to `true` to skip local check-run and commit-status
+evaluation only for pull requests that already have GitHub auto-merge enabled.
+Author filtering, the `auto-merge` version policy, and successful approval still
+apply. GitHub enforces required checks and handles the merge using the pull
+request's existing auto-merge method; `merge-method` is not used for these PRs.
+
+This option does not enable new auto-merge requests. When it is `false` or
+omitted, or a pull request has no existing auto-merge request, the original
+checks and direct-merge behavior remain unchanged.
+
 ### `merge-method` (optional)
 
 The merge method to use: `merge`, `squash` or `rebase`. Defaults to `merge`.
